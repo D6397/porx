@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隧道代理后台管理系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="/src/styles/main.css">
+</head>
+<body>
+    <div id="app"></div>
+    
+    <!-- API配置 -->
+    <script src="/src/api/config.js"></script>
+    
+    <!-- 组件 -->
+    <script src="/src/components/Login.js"></script>
+    <script src="/src/components/Header.js"></script>
+    <script src="/src/components/Sidebar.js"></script>
+    
+    <!-- 视图 -->
+    <script src="/src/views/Dashboard.js"></script>
+    <script src="/src/views/Users.js"></script>
+    <script src="/src/views/Servers.js"></script>
+    <script src="/src/views/Logs.js"></script>
+    
+         <!-- 主应用 -->
+    <script>
+        // 主应用
+                    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+        const { ElMessage, ElMessageBox } = ElementPlus;
+        
+        const App = {
+            components: {
+                'login-component': LoginComponent,
+                'header-component': HeaderComponent,
+                'sidebar-component': SidebarComponent,
+                'dashboard-view': DashboardView,
+                'users-view': UsersView,
+                'servers-view': ServersView,
+                'logs-view': LogsView
+            },
+            setup() {
+                const isLoggedIn = ref(false);
+                const currentView = ref('dashboard');
+                const user = ref(null);
+                
+                // 登录相关
+                const loginForm = reactive({
+                    username: '',
+                    password: ''
+                });
+                
+                // 用户管理
+                const users = ref([]);
+                const servers = ref([]);
+                const stats = ref({
+                    totalUsers: 0,
+                    activeConnections: 0,
+                    totalServers: 0
+                });
+                
+                // 用户编辑相关
+                const showUserDialog = ref(false);
+                const editingUser = ref(null);
+                const userForm = reactive({
+                    username: '',
+                    password: '',
+                    max_connections: 10,
+                    expire_date: '',
+                    status: 'active'
+                });
+                const userPagination = ref({
+                    page: 1,
+                    limit: 10,
+                    total: 0
+                });
+                const userSearch = ref('');
+                
+                // 日志相关状态
+                const logs = ref([]);
+                const logStats = ref(null);
+                const logsLoading = ref(false);
+                const logFilters = ref({
+                    type: 'connection',
+                    level: 'all',
+                    lines: 100
+                });
+                const logPagination = ref({
+                    page: 1,
+                    limit: 20,
+                    total: 0
+                });
+                
+                // 检查登录状态
+                const checkAuth = async () => {
+                    const token = localStorage.getItem('token');
+                    if (token) {
+                        try {
+                            const response = await api.get('/auth/me');
+                            user.value = response.data.user;
+                            isLoggedIn.value = true;
+                            await loadDashboard();
+                        } catch (error) {
+                            localStorage.removeItem('token');
+                        }
+                    }
+                };
+                
+                // 登录
+                const login = async () => {
+                    try {
+                        const response = await api.post('/auth/login', loginForm);
+                        if (response.data.success) {
+                            localStorage.setItem('token', response.data.token);
+                            user.value = response.data.user;
+                            isLoggedIn.value = true;
+                            ElMessage.success('登录成功');
+                            await loadDashboard();
+                        }
+                    } catch (error) {
+                        ElMessage.error(error.response?.data?.error || '登录失败');
+                    }
+                };
+                
+                // 登出
+                const logout = async () => {
+                    try {
+                        await api.post('/auth/logout');
+                    } catch (error) {
+                        // 忽略错误
+                    }
+                    localStorage.removeItem('token');
+                    isLoggedIn.value = false;
+                    user.value = null;
+                    ElMessage.success('已退出登录');
+                };
+                
+                // 加载仪表盘数据
+                const loadDashboard = async () => {
+                    try {
+                        const [usersRes, serversRes] = await Promise.all([
+                            api.get('/users'),
+                            api.get('/proxy/servers')
+                        ]);
+                        
+                        users.value = usersRes.data.data;
+                        servers.value = serversRes.data.data;
+                        
+                        stats.value = {
+                            totalUsers: users.value.length,
+                            activeConnections: users.value.filter(u => u.status === 'active').length,
+                            totalServers: servers.value.length
+                        };
+                    } catch (error) {
+                        ElMessage.error('加载数据失败');
+                    }
+                };
+                
+                // 加载用户列表
+                const loadUsers = async () => {
+                    try {
+                        const params = {
+                            page: userPagination.value.page,
+                            limit: userPagination.value.limit
+                        };
+                        if (userSearch.value) {
+                            params.search = userSearch.value;
+                        }
+                        
+                        const response = await api.get('/users', { params });
+                        users.value = response.data.data;
+                        userPagination.value.total = response.data.pagination?.total || response.data.data.length;
+                    } catch (error) {
+                        ElMessage.error('加载用户列表失败');
+                    }
+                };
+                
+                // 打开用户编辑对话框
+                const openUserDialog = (user = null) => {
+                    console.log('openUserDialog 被调用，参数:', user);
+                    editingUser.value = user;
+                    if (user) {
+                        // 编辑模式
+                        userForm.username = user.username;
+                        userForm.password = '';
+                        userForm.max_connections = user.max_connections;
+                        userForm.expire_date = user.expire_date ? user.expire_date.split('T')[0] : '';
+                        userForm.status = user.status;
+                    } else {
+                        // 新增模式
+                        userForm.username = '';
+                        userForm.password = '';
+                        userForm.max_connections = 10;
+                        userForm.expire_date = '';
+                        userForm.status = 'active';
+                    }
+                    showUserDialog.value = true;
+                };
+                
+                // 保存用户
+                const saveUser = async () => {
+                    try {
+                        if (!userForm.username || (!editingUser.value && !userForm.password)) {
+                            ElMessage.error('请填写必要信息');
+                            return;
+                        }
+                        
+                        const data = {
+                            username: userForm.username,
+                            max_connections: userForm.max_connections,
+                            expire_date: userForm.expire_date || null,
+                            status: userForm.status
+                        };
+                        
+                        if (userForm.password) {
+                            data.password = userForm.password;
+                        }
+                        
+                        if (editingUser.value) {
+                            // 更新用户
+                            await api.put(`/users/${editingUser.value.id}`, data);
+                            ElMessage.success('用户更新成功');
+                        } else {
+                            // 创建用户
+                            await api.post('/users', data);
+                            ElMessage.success('用户创建成功');
+                        }
+                        
+                        showUserDialog.value = false;
+                        await loadUsers();
+                        await loadDashboard();
+                    } catch (error) {
+                        ElMessage.error(error.response?.data?.error || '操作失败');
+                    }
+                };
+                
+                // 删除用户
+                const deleteUser = async (user) => {
+                    try {
+                        await ElMessageBox.confirm(
+                            `确定要删除用户 "${user.username}" 吗？此操作不可恢复。`,
+                            '确认删除',
+                            {
+                                confirmButtonText: '确定',
+                                cancelButtonText: '取消',
+                                type: 'warning',
+                            }
+                        );
+                        
+                        await api.delete(`/users/${user.id}`);
+                        ElMessage.success('用户删除成功');
+                        await loadUsers();
+                        await loadDashboard();
+                    } catch (error) {
+                        if (error !== 'cancel') {
+                            ElMessage.error(error.response?.data?.error || '删除失败');
+                        }
+                    }
+                };
+                
+                // 启动/停止代理服务器
+                const toggleServer = async (serverId, action) => {
+                    try {
+                        await api.post(`/proxy/servers/${serverId}/${action}`);
+                        ElMessage.success(`服务器${action === 'start' ? '启动' : '停止'}成功`);
+                        await loadDashboard();
+                        await loadServers(); // 同时更新服务器列表
+                    } catch (error) {
+                        ElMessage.error(`操作失败: ${error.response?.data?.error || error.message}`);
+                    }
+                };
+
+                // 加载服务器列表
+                const loadServers = async () => {
+                    try {
+                        const response = await api.get('/proxy/servers');
+                        servers.value = response.data.data;
+                    } catch (error) {
+                        ElMessage.error('加载服务器列表失败');
+                    }
+                };
+                
+                // 加载日志数据
+                const loadLogs = async () => {
+                    logsLoading.value = true;
+                    try {
+                        // 检查登录状态
+                        if (!localStorage.getItem('token')) {
+                            ElMessage.warning('请先登录');
+                            return;
+                        }
+                        
+                        if (logFilters.value.type === 'connection') {
+                            // 加载连接日志
+                            const response = await api.get('/proxy/logs', {
+                                params: {
+                                    page: logPagination.value.page,
+                                    limit: logPagination.value.limit
+                                }
+                            });
+                            logs.value = response.data.data || [];
+                            logPagination.value.total = response.data.pagination?.total || 0;
+                        } else {
+                            // 加载系统日志
+                            const response = await api.get('/logs/system', {
+                                params: {
+                                    type: logFilters.value.type === 'system' ? 'app' : logFilters.value.type,
+                                    lines: logFilters.value.lines,
+                                    level: logFilters.value.level === 'all' ? undefined : logFilters.value.level
+                                }
+                            });
+                            logs.value = response.data.data || [];
+                        }
+                        
+                        // 加载日志统计（可选，失败不影响主要功能）
+                        try {
+                            const statsResponse = await api.get('/proxy/logs/stats');
+                            logStats.value = statsResponse.data.data;
+                        } catch (statsError) {
+                            console.warn('加载日志统计失败:', statsError);
+                            logStats.value = null;
+                        }
+                    } catch (error) {
+                        console.error('日志加载错误:', error);
+                        
+                        if (error.response?.status === 401) {
+                            ElMessage.error('认证失败，请重新登录');
+                            // 不自动跳转，让用户手动重新登录
+                        } else {
+                            ElMessage.error(`加载日志失败: ${error.response?.data?.error || error.message}`);
+                        }
+                        
+                        // 清空日志数据
+                        logs.value = [];
+                        logStats.value = null;
+                    } finally {
+                        logsLoading.value = false;
+                    }
+                };
+                
+                // 导出日志
+                const exportLogs = async () => {
+                    try {
+                        const response = await api.get('/proxy/logs/export', {
+                            params: { format: 'csv' },
+                            responseType: 'blob'
+                        });
+                        
+                        const blob = new Blob([response.data], { type: 'text/csv' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `logs-${new Date().toISOString().split('T')[0]}.csv`;
+                        link.click();
+                        window.URL.revokeObjectURL(url);
+                        
+                        ElMessage.success('日志导出成功');
+                    } catch (error) {
+                        ElMessage.error('导出日志失败');
+                    }
+                };
+                
+                // 清理日志
+                const clearLogs = async () => {
+                    try {
+                        await ElMessageBox.confirm('确定要清理30天前的日志吗？此操作不可撤销。', '确认清理', {
+                            confirmButtonText: '确定',
+                            cancelButtonText: '取消',
+                            type: 'warning'
+                        });
+                        
+                        const response = await api.post('/proxy/logs/cleanup', { days: 30 });
+                        ElMessage.success(response.data.message);
+                        await loadLogs();
+                    } catch (error) {
+                        if (error !== 'cancel') {
+                            ElMessage.error('清理日志失败');
+                        }
+                    }
+                };
+                
+                // 处理菜单选择
+                const handleMenuSelect = async (key) => {
+                    currentView.value = key;
+                    
+                    if (key === 'logs') {
+                        // 检查登录状态
+                        if (!isLoggedIn.value || !localStorage.getItem('token')) {
+                            ElMessage.warning('请先登录以查看日志');
+                            currentView.value = 'dashboard';
+                            return;
+                        }
+                        
+                        // 延迟加载日志，确保界面已渲染
+                        await nextTick();
+                        loadLogs();
+                    } else if (key === 'users') {
+                        loadUsers();
+                    } else if (key === 'servers') {
+                        loadServers();
+                    }
+                };
+                
+                // 处理日志类型切换
+                const handleLogTypeChange = async () => {
+                    // 检查登录状态
+                    if (!isLoggedIn.value || !localStorage.getItem('token')) {
+                        ElMessage.warning('登录状态已过期，请重新登录');
+                        return;
+                    }
+                    
+                    // 重置分页
+                    logPagination.value.page = 1;
+                    
+                    // 加载新类型的日志
+                    await loadLogs();
+                };
+                
+                onMounted(() => {
+                    checkAuth();
+                });
+                
+                return {
+                    isLoggedIn,
+                    currentView,
+                    user,
+                    loginForm,
+                    users,
+                    servers,
+                    stats,
+                    logs,
+                    logStats,
+                    logsLoading,
+                    logFilters,
+                    logPagination,
+                    showUserDialog,
+                    editingUser,
+                    userForm,
+                    userPagination,
+                    userSearch,
+                    login,
+                    logout,
+                    loadDashboard,
+                    loadUsers,
+                    openUserDialog,
+                    saveUser,
+                    deleteUser,
+                    toggleServer,
+                    loadServers,
+                    loadLogs,
+                    exportLogs,
+                    clearLogs,
+                    handleMenuSelect,
+                    handleLogTypeChange
+                };
+            },
+            template: `
+                <!-- 登录界面 -->
+                <login-component 
+                    v-if="!isLoggedIn" 
+                    :login-form="loginForm" 
+                    @login="login"
+                />
+                
+                <!-- 主界面 -->
+                <div v-else class="main-container">
+                    <header-component 
+                        :user="user" 
+                        @logout="logout"
+                    />
+                    
+                    <div class="content">
+                        <sidebar-component 
+                            :current-view="currentView" 
+                            @menu-select="handleMenuSelect"
+                        />
+                        
+                        <div class="main-content">
+                            <!-- 仪表盘 -->
+                            <dashboard-view 
+                                v-if="currentView === 'dashboard'"
+                                :stats="stats"
+                                :users="users"
+                            />
+                            
+                            <!-- 用户管理 -->
+                            <users-view 
+                                v-if="currentView === 'users'"
+                                :users="users"
+                                :user-search="userSearch"
+                                :user-pagination="userPagination"
+                                :show-user-dialog="showUserDialog"
+                                :editing-user="editingUser"
+                                :user-form="userForm"
+                                @update:user-search="val => userSearch = val"
+                                @update:show-user-dialog="val => showUserDialog = val"
+                                @load-users="loadUsers"
+                                @open-user-dialog="openUserDialog"
+                                @save-user="saveUser"
+                                @delete-user="deleteUser"
+                            />
+                            
+                            <!-- 服务器管理 -->
+                            <servers-view 
+                                v-if="currentView === 'servers'"
+                                :servers="servers"
+                                @toggle-server="toggleServer"
+                                @refresh-servers="loadServers"
+                            />
+                            
+                            <!-- 日志查看 -->
+                            <logs-view 
+                                v-if="currentView === 'logs'"
+                                :logs="logs"
+                                :log-stats="logStats"
+                                :logs-loading="logsLoading"
+                                :log-filters="logFilters"
+                                :log-pagination="logPagination"
+                                @load-logs="loadLogs"
+                                @export-logs="exportLogs"
+                                @clear-logs="clearLogs"
+                                @handle-log-type-change="handleLogTypeChange"
+                            />
+                        </div>
+                    </div>
+                </div>
+            `
+        };
+        
+        // 初始化应用
+        createApp(App).use(ElementPlus).mount('#app');
+    </script>
+</body>
+</html> 

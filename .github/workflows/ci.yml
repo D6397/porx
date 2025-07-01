@@ -1,0 +1,89 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+          MYSQL_DATABASE: proxy_test
+          MYSQL_USER: proxy
+          MYSQL_PASSWORD: testpass
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: 使用 Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: 安装依赖
+      run: npm ci
+    
+    - name: 检查代码格式
+      run: npm run lint || echo "未配置linting"
+    
+    - name: 运行测试
+      run: npm test
+      env:
+        DB_HOST: localhost
+        DB_PORT: 3306
+        DB_NAME: proxy_test
+        DB_USER: proxy
+        DB_PASSWORD: testpass
+        JWT_SECRET: test_secret_key
+    
+    - name: 构建项目
+      run: npm run build || echo "无需构建步骤"
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: 构建 Docker 镜像
+      run: docker build -t proxy-admin-system .
+    
+    - name: 测试 Docker 镜像
+      run: |
+        docker run -d --name test-container \
+          -e DB_HOST=host.docker.internal \
+          -e DB_NAME=proxy \
+          -e DB_USER=proxy \
+          -e DB_PASSWORD=testpass \
+          -e JWT_SECRET=test_secret \
+          -p 3000:3000 \
+          proxy-admin-system
+        sleep 10
+        docker logs test-container
+        docker stop test-container
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: 运行安全审计
+      run: npm audit --audit-level=moderate 

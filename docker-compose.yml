@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  proxy-admin:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=proxy
+      - DB_USER=proxy
+      - DB_PASSWORD=proxy123
+      - JWT_SECRET=your_super_secret_jwt_key_change_this_in_production
+      - JWT_EXPIRES_IN=7d
+    volumes:
+      - ./ssl:/app/ssl
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=proxy
+      - MYSQL_USER=proxy
+      - MYSQL_PASSWORD=proxy123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+
+volumes:
+  mysql_data: 

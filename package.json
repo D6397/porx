@@ -1,0 +1,66 @@
+{
+  "name": "proxy-admin-system",
+  "version": "1.2.0",
+  "description": "一个基于Web的隧道代理管理系统，提供完整的后台管理界面来管理代理用户、服务器配置、SSL证书和连接监控",
+  "main": "server/app.js",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "nodemon server/app.js",
+    "test": "echo \"暂无测试\" && exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/proxy-admin-system.git"
+  },
+  "homepage": "https://github.com/your-username/proxy-admin-system#readme",
+  "bugs": {
+    "url": "https://github.com/your-username/proxy-admin-system/issues"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.18.2",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.14.1",
+    "sequelize": "^6.37.7"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "proxy",
+    "tunnel",
+    "proxy-server",
+    "admin-panel",
+    "ssl-management",
+    "web-admin",
+    "node.js",
+    "express",
+    "vue.js",
+    "mysql",
+    "ssl-certificate",
+    "proxy-management"
+  ],
+  "author": {
+    "name": "Your Name",
+    "email": "your.email@example.com",
+    "url": "https://github.com/your-username"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "files": [
+    "server/",
+    "web/",
+    "scripts/",
+    "ssl/",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ]
+}
